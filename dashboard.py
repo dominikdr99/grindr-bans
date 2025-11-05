@@ -136,21 +136,38 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
         now = df_times["banned_at_local"].max()
 
     today = now.date()
+    start_of_today = pd.Timestamp(today)
+    hours_today = max((now - start_of_today).total_seconds() / 3600, 1)
+    window_24h = now - pd.Timedelta(hours=24)
     window_12h = now - pd.Timedelta(hours=12)
     window_4h = now - pd.Timedelta(hours=4)
     window_1h = now - pd.Timedelta(hours=1)
 
     todays_bans = df_times[df_times["banned_at_local"].dt.date == today].shape[0]
+    last_24h = df_times[df_times["banned_at_local"] >= window_24h].shape[0]
     last_12h = df_times[df_times["banned_at_local"] >= window_12h].shape[0]
     last_4h = df_times[df_times["banned_at_local"] >= window_4h].shape[0]
     last_1h = df_times[df_times["banned_at_local"] >= window_1h].shape[0]
 
-    cols = st.columns(5)
+    avg_today = todays_bans / hours_today if todays_bans else 0
+    avg_24h = last_24h / 24 if last_24h else 0
+    avg_12h = last_12h / 12 if last_12h else 0
+    avg_4h = last_4h / 4 if last_4h else 0
+    avg_1h = last_1h  # one-hour window
+
+    cols = st.columns(6)
     cols[0].metric("Total bans", f"{total_bans:,}")
     cols[1].metric("Today", f"{todays_bans:,}")
-    cols[2].metric("Last 12h", f"{last_12h:,}")
-    cols[3].metric("Last 4h", f"{last_4h:,}")
-    cols[4].metric("Last hour", f"{last_1h:,}")
+    cols[2].metric("Last 24h", f"{last_24h:,}")
+    cols[3].metric("Last 12h", f"{last_12h:,}")
+    cols[4].metric("Last 4h", f"{last_4h:,}")
+    cols[5].metric("Last hour", f"{last_1h:,}")
+
+    cols[1].caption(f"Avg/hr: {int(round(avg_today))}")
+    cols[2].caption(f"Avg/hr: {int(round(avg_24h))}")
+    cols[3].caption(f"Avg/hr: {int(round(avg_12h))}")
+    cols[4].caption(f"Avg/hr: {int(round(avg_4h))}")
+    cols[5].caption(f"Avg/hr: {int(round(avg_1h))}")
 
     if df.empty or not selected_talents:
         return
@@ -164,12 +181,18 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
 
     if df_times.empty:
         today_counts = pd.Series(dtype="int64")
+        last_24h_counts = pd.Series(dtype="int64")
         last_12h_counts = pd.Series(dtype="int64")
         last_4h_counts = pd.Series(dtype="int64")
         last_hour_counts = pd.Series(dtype="int64")
     else:
         today_counts = (
             df_times[df_times["banned_at_local"].dt.date == today]
+            .groupby("talent")
+            .size()
+        )
+        last_24h_counts = (
+            df_times[df_times["banned_at_local"] >= window_24h]
             .groupby("talent")
             .size()
         )
@@ -190,10 +213,18 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
         )
 
     breakdown["Today"] = breakdown["talent"].map(today_counts).fillna(0).astype(int)
+    breakdown["Last 24h"] = breakdown["talent"].map(last_24h_counts).fillna(0).astype(int)
     breakdown["Last 12h"] = breakdown["talent"].map(last_12h_counts).fillna(0).astype(int)
     breakdown["Last 4h"] = breakdown["talent"].map(last_4h_counts).fillna(0).astype(int)
     breakdown["Last hour"] = breakdown["talent"].map(last_hour_counts).fillna(0).astype(int)
     breakdown["bans"] = breakdown["bans"].astype(int)
+
+    breakdown["Today Avg/hr"] = (breakdown["Today"] / hours_today).round().astype(int)
+    breakdown["Last 24h Avg/hr"] = (breakdown["Last 24h"] / 24).round().astype(int)
+    breakdown["Last 12h Avg/hr"] = (breakdown["Last 12h"] / 12).round().astype(int)
+    breakdown["Last 4h Avg/hr"] = (breakdown["Last 4h"] / 4).round().astype(int)
+    breakdown["Last hour Avg/hr"] = breakdown["Last hour"].round().astype(int)
+
     breakdown.rename(
         columns={
             "talent": "Model",
@@ -201,7 +232,23 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
         },
         inplace=True,
     )
-    breakdown = breakdown[["Model", "Bans", "Today", "Last 12h", "Last 4h", "Last hour"]]
+
+    breakdown = breakdown[
+        [
+            "Model",
+            "Bans",
+            "Last 24h",
+            "Last 24h Avg/hr",
+            "Today",
+            "Today Avg/hr",
+            "Last 12h",
+            "Last 12h Avg/hr",
+            "Last 4h",
+            "Last 4h Avg/hr",
+            "Last hour",
+            "Last hour Avg/hr",
+        ]
+    ]
     st.caption("Breakdown by model and recent activity")
     st.dataframe(breakdown, use_container_width=True, hide_index=True)
 
@@ -218,34 +265,116 @@ def time_series_chart(df: pd.DataFrame, granularity: str):
         .reset_index(name="count")
     )
     daily = daily.rename(columns={"banned_at_local": "period"})
-    chart = (
-        alt.Chart(daily)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("period:T", title="Date & time" if granularity == "Hourly" else "Date"),
-            y=alt.Y("count:Q", title=f"Bans per {granularity.lower()}"),
-            color=alt.Color(
-                "talent:N",
-                title="Model",
-                scale=alt.Scale(
-                    range=[
-                        "#F97068",
-                        "#577590",
-                        "#43AA8B",
-                        "#F9C74F",
-                        "#9B5DE5",
-                        "#F9844A",
-                        "#90BE6D",
-                        "#277DA1",
-                        "#F94144",
-                        "#EF476F",
-                    ]
-                ),
-            ),
-            tooltip=["period:T", "talent:N", "count:Q"],
-        )
+    period_title = "Date & time" if granularity == "Hourly" else "Date"
+    time_format = "%b %d, %Y %H:%M" if granularity == "Hourly" else "%b %d, %Y"
+    summary_counts = (
+        daily.groupby("period", as_index=False)["count"]
+        .sum()
+        .rename(columns={"count": "total_bans"})
     )
-    st.altair_chart(chart, use_container_width=True)
+    breakdown_strings = (
+        daily.sort_values(["period", "count"], ascending=[True, False])
+        .groupby("period")
+        .apply(
+            lambda grp: "\n".join(
+                f"{talent or 'Unknown'}: {int(value)}"
+                for talent, value in zip(grp["talent"], grp["count"])
+            )
+        )
+        .reset_index(name="model_breakdown")
+    )
+    summary = summary_counts.merge(breakdown_strings, on="period", how="left")
+    summary["model_breakdown"] = summary["model_breakdown"].fillna("No data")
+    mask = summary["model_breakdown"] != "No data"
+    summary.loc[mask, "model_breakdown"] = summary.loc[mask, "model_breakdown"].apply(
+        lambda text: "\n".join(f"• {line}" for line in text.split("\n"))
+    )
+    delta = pd.Timedelta(days=1) if freq == "D" else pd.Timedelta(hours=1)
+    summary["period_end"] = summary["period"] + delta
+    daily = daily.merge(summary[["period", "total_bans"]], on="period", how="left")
+    hover = alt.selection_point(
+        fields=["period"], nearest=True, on="pointermove", empty="none"
+    )
+
+    color_scale = alt.Scale(
+        range=[
+            "#F97068",
+            "#577590",
+            "#43AA8B",
+            "#F9C74F",
+            "#9B5DE5",
+            "#F9844A",
+            "#90BE6D",
+            "#277DA1",
+            "#F94144",
+            "#EF476F",
+        ]
+    )
+    base = alt.Chart(daily)
+    hover_region = (
+        alt.Chart(summary)
+        .mark_rect(opacity=0)
+        .encode(
+            x=alt.X("period:T", axis=None),
+            x2=alt.X2("period_end:T"),
+            tooltip=[
+                alt.Tooltip("period:T", title=period_title, format=time_format),
+                alt.Tooltip("total_bans:Q", title="Total bans"),
+                alt.Tooltip("model_breakdown:N", title="By model"),
+            ],
+        )
+        .add_params(hover)
+    )
+    lines = base.mark_line(
+        point=alt.OverlayMarkDef(filled=True, size=50), strokeWidth=2
+    ).encode(
+        x=alt.X(
+            "period:T",
+            title=period_title,
+            axis=alt.Axis(format=time_format if granularity == "Hourly" else "%b %d"),
+        ),
+        y=alt.Y("count:Q", title=f"Bans per {granularity.lower()}"),
+        color=alt.Color(
+            "talent:N",
+            title="Model",
+            scale=color_scale,
+        ),
+        tooltip=[
+            alt.Tooltip("period:T", title=period_title, format=time_format),
+            alt.Tooltip("talent:N", title="Model"),
+            alt.Tooltip("count:Q", title=f"Bans ({granularity.lower()})"),
+            alt.Tooltip("total_bans:Q", title="Total bans"),
+        ],
+    )
+    lines = lines.add_params(hover)
+
+    highlighted_points = (
+        base.mark_circle(size=65)
+        .encode(
+            x=alt.X("period:T", title=period_title),
+            y=alt.Y("count:Q", title=f"Bans per {granularity.lower()}"),
+            color=alt.Color("talent:N", title="Model", scale=color_scale),
+            opacity=alt.condition(hover, alt.value(1), alt.value(0)),
+        )
+        .transform_filter(hover)
+    )
+
+    totals_rule = (
+        alt.Chart(summary)
+        .mark_rule(color="#A8A8A8")
+        .encode(
+            x=alt.X("period:T", title=period_title),
+            tooltip=[
+                alt.Tooltip("period:T", title=period_title, format=time_format),
+                alt.Tooltip("total_bans:Q", title="Total bans"),
+                alt.Tooltip("model_breakdown:N", title="By model"),
+            ],
+        )
+        .transform_filter(hover)
+    )
+
+    chart = alt.layer(hover_region, lines, highlighted_points, totals_rule)
+    st.altair_chart(chart.interactive(), use_container_width=True)
 
 
 def distribution_charts(df: pd.DataFrame):
