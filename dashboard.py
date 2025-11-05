@@ -239,10 +239,15 @@ def distribution_charts(df: pd.DataFrame):
             .reset_index()
             .rename(columns={"index": "category", column: "Bans"})
         )
-        if data.empty or data["Bans"].sum() == 0:
+        if data.empty:
             chart_columns[idx].info(f"No data for {label.lower()}.")
             continue
-        data["Share"] = data["Bans"] / data["Bans"].sum()
+        data["Bans"] = pd.to_numeric(data["Bans"], errors="coerce").fillna(0)
+        total_bans = data["Bans"].sum()
+        if total_bans == 0:
+            chart_columns[idx].info(f"No data for {label.lower()}.")
+            continue
+        data["Share"] = data["Bans"] / total_bans
         chart = (
             alt.Chart(data)
             .mark_arc(innerRadius=50)
