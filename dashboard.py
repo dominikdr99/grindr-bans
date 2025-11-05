@@ -1,46 +1,42 @@
-import sqlite3
-from pathlib import Path
+from typing import Iterable
 
 import pandas as pd
 import streamlit as st
 import altair as alt
+import requests
 
-DB_PATH = Path("data/bans.db")
-
-
-def fail_if_missing_db():
-    if not DB_PATH.exists():
-        st.error(f"Database not found at `{DB_PATH}`. Run `monitor.py` first to pull data.")
-        st.stop()
+from monitor import SOURCES, fetch_records, normalize_row
+API_ERROR_HELP = "Verify Streamlit secrets or environment variables for NocoDB access and redeploy."
 
 
-@st.cache_resource
-def get_connection(db_path: str):
-    return sqlite3.connect(db_path, check_same_thread=False)
+def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
+    rows: list[dict] = []
+    missing_sources = True
+    for source in sources:
+        table_id = source.get("table_id")
+        if not table_id:
+            continue
+        missing_sources = False
+        label = source.get("label") or "Unknown"
+        view_id = source.get("view_id")
+        try:
+            records = fetch_records(table_id=table_id, view_id=view_id)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Failed to pull data for {label}: {exc}") from exc
+        rows.extend(normalize_row(record, talent=label) for record in records)
+
+    if missing_sources:
+        raise RuntimeError("No NocoDB sources configured.")
+
+    return rows
 
 
-@st.cache_data(ttl=60)
-def load_bans(db_path: str) -> pd.DataFrame:
-    conn = get_connection(db_path)
-    df = pd.read_sql_query(
-        """
-        SELECT
-            account_id,
-            talent,
-            username,
-            email,
-            about_me,
-            model,
-            platform,
-            reason,
-            status,
-            banned_at_utc,
-            banned_at_local
-        FROM bans
-        ORDER BY banned_at_local DESC
-        """,
-        conn,
-    )
+@st.cache_data(ttl=300)
+def load_bans() -> pd.DataFrame:
+    if not SOURCES:
+        raise RuntimeError("No NocoDB sources configured.")
+
+    df = pd.DataFrame(fetch_all_sources(SOURCES))
     if df.empty:
         return df
     for col in ("banned_at_local", "banned_at_utc"):
@@ -242,12 +238,15 @@ def main():
         layout="wide",
     )
     st.title("🚫 Ban Monitor Dashboard")
-    st.caption("Explore bans pulled from NocoDB via the local monitor.")
+    st.caption("Explore bans pulled directly from NocoDB.")
 
-    fail_if_missing_db()
-    df = load_bans(str(DB_PATH))
+    try:
+        df = load_bans()
+    except RuntimeError as exc:
+        st.error(f"{exc}\n{API_ERROR_HELP}")
+        st.stop()
     if df.empty:
-        st.info("No bans available yet. Run the monitor to populate the database.")
+        st.info("No bans available yet. Confirm your NocoDB tables contain data.")
         return
 
     filtered_df, selected_talents = sidebar_filters(df)
