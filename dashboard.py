@@ -157,24 +157,37 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
 
     breakdown = (
         df.groupby("talent")
-        .agg(
-            bans=("account_id", "count"),
-            unique_accounts=("account_id", "nunique"),
-            unique_emails=("email", "nunique"),
-        )
+        .agg(bans=("account_id", "count"))
         .reset_index()
         .sort_values("bans", ascending=False)
     )
+
+    if df_times.empty:
+        today_counts = pd.Series(dtype="int64")
+        last_12h_counts = pd.Series(dtype="int64")
+    else:
+        today_counts = (
+            df_times[df_times["banned_at_local"].dt.date == today]
+            .groupby("talent")
+            .size()
+        )
+        last_12h_counts = (
+            df_times[df_times["banned_at_local"] >= window_12h]
+            .groupby("talent")
+            .size()
+        )
+
+    breakdown["Today"] = breakdown["talent"].map(today_counts).fillna(0).astype(int)
+    breakdown["Last 12h"] = breakdown["talent"].map(last_12h_counts).fillna(0).astype(int)
+    breakdown["bans"] = breakdown["bans"].astype(int)
     breakdown.rename(
         columns={
             "talent": "Model",
             "bans": "Bans",
-            "unique_accounts": "Unique Accounts",
-            "unique_emails": "Unique Emails",
         },
         inplace=True,
     )
-    st.caption("Breakdown by model")
+    st.caption("Breakdown by model and recent activity")
     st.dataframe(breakdown, use_container_width=True, hide_index=True)
 
 
@@ -201,6 +214,50 @@ def time_series_chart(df: pd.DataFrame, granularity: str):
         )
     )
     st.altair_chart(chart, use_container_width=True)
+
+
+def distribution_charts(df: pd.DataFrame):
+    if df.empty:
+        return
+
+    st.subheader("Ban Distribution")
+    chart_columns = st.columns(3)
+    chart_specs = [
+        ("model", "Device Model"),
+        ("platform", "Device Manufacturer"),
+        ("talent", "Model"),
+    ]
+
+    for idx, (column, label) in enumerate(chart_specs):
+        if column not in df.columns:
+            chart_columns[idx].info(f"No data for {label.lower()}.")
+            continue
+        data = (
+            df[column]
+            .fillna("Unknown")
+            .value_counts()
+            .reset_index()
+            .rename(columns={"index": "category", column: "Bans"})
+        )
+        if data.empty or data["Bans"].sum() == 0:
+            chart_columns[idx].info(f"No data for {label.lower()}.")
+            continue
+        data["Share"] = data["Bans"] / data["Bans"].sum()
+        chart = (
+            alt.Chart(data)
+            .mark_arc(innerRadius=50)
+            .encode(
+                theta=alt.Theta("Bans:Q", stack=True),
+                color=alt.Color("category:N", title=label),
+                tooltip=[
+                    alt.Tooltip("category:N", title=label),
+                    alt.Tooltip("Bans:Q", title="Bans"),
+                    alt.Tooltip("Share:Q", title="Share", format=".1%"),
+                ],
+            )
+            .properties(title=label)
+        )
+        chart_columns[idx].altair_chart(chart, use_container_width=True)
 
 
 def bans_table(df: pd.DataFrame):
@@ -252,6 +309,7 @@ def main():
     filtered_df, selected_talents = sidebar_filters(df)
 
     summary_metrics(filtered_df, selected_talents)
+    distribution_charts(filtered_df)
     st.subheader("Trends")
     granularity = st.radio("Time granularity", ["Daily", "Hourly"], horizontal=True)
     time_series_chart(filtered_df, granularity)
