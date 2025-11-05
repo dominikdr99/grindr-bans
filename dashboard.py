@@ -77,7 +77,12 @@ def sidebar_filters(df: pd.DataFrame):
         "Last N days",
         "Custom range",
     ]
-    range_choice = st.sidebar.selectbox("Time range", range_options, index=0)
+    default_range_index = range_options.index("Last 24 hours")
+    range_choice = st.sidebar.selectbox(
+        "Time range",
+        range_options,
+        index=default_range_index,
+    )
     custom_days = None
     custom_range = ()
     if range_choice == "Last N days":
@@ -128,7 +133,7 @@ def sidebar_filters(df: pd.DataFrame):
     return df.loc[mask].copy(), selected_talents
 
 
-def summary_metrics(df: pd.DataFrame, selected_talents):
+def summary_metrics(df: pd.DataFrame):
     total_bans = len(df)
     now = pd.Timestamp.utcnow().tz_localize(None)
     df_times = df.dropna(subset=["banned_at_local"]).copy()
@@ -169,7 +174,7 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
     cols[4].caption(f"Avg/hr: {int(round(avg_4h))}")
     cols[5].caption(f"Avg/hr: {int(round(avg_1h))}")
 
-    if df.empty or not selected_talents:
+    if df.empty:
         return
 
     breakdown = (
@@ -249,6 +254,7 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
             "Last hour Avg/hr",
         ]
     ]
+    st.caption("Metrics reflect all bans (filters do not apply here).")
     st.caption("Breakdown by model and recent activity")
     st.dataframe(breakdown, use_container_width=True, hide_index=True)
 
@@ -487,11 +493,17 @@ def main():
         st.info("No bans available yet. Confirm your NocoDB tables contain data.")
         return
 
-    filtered_df, selected_talents = sidebar_filters(df)
+    filtered_df, _ = sidebar_filters(df)
 
-    summary_metrics(filtered_df, selected_talents)
+    summary_metrics(df)
     st.subheader("Trends")
-    granularity = st.radio("Time granularity", ["Daily", "Hourly"], horizontal=True)
+    granularity_options = ["Daily", "Hourly"]
+    granularity = st.radio(
+        "Time granularity",
+        granularity_options,
+        horizontal=True,
+        index=granularity_options.index("Hourly"),
+    )
     time_series_chart(filtered_df, granularity)
 
     distribution_charts(filtered_df)
