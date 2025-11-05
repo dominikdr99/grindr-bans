@@ -31,7 +31,7 @@ def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
     return rows
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=1800)
 def load_bans() -> pd.DataFrame:
     if not SOURCES:
         raise RuntimeError("No NocoDB sources configured.")
