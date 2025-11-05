@@ -1,0 +1,5 @@
+env/
+__pycache__/
+*.pyc
+data/bans.db
+.DS_Store
