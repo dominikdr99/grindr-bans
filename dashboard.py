@@ -165,6 +165,8 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
     if df_times.empty:
         today_counts = pd.Series(dtype="int64")
         last_12h_counts = pd.Series(dtype="int64")
+        last_4h_counts = pd.Series(dtype="int64")
+        last_hour_counts = pd.Series(dtype="int64")
     else:
         today_counts = (
             df_times[df_times["banned_at_local"].dt.date == today]
@@ -176,9 +178,21 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
             .groupby("talent")
             .size()
         )
+        last_4h_counts = (
+            df_times[df_times["banned_at_local"] >= window_4h]
+            .groupby("talent")
+            .size()
+        )
+        last_hour_counts = (
+            df_times[df_times["banned_at_local"] >= window_1h]
+            .groupby("talent")
+            .size()
+        )
 
     breakdown["Today"] = breakdown["talent"].map(today_counts).fillna(0).astype(int)
     breakdown["Last 12h"] = breakdown["talent"].map(last_12h_counts).fillna(0).astype(int)
+    breakdown["Last 4h"] = breakdown["talent"].map(last_4h_counts).fillna(0).astype(int)
+    breakdown["Last hour"] = breakdown["talent"].map(last_hour_counts).fillna(0).astype(int)
     breakdown["bans"] = breakdown["bans"].astype(int)
     breakdown.rename(
         columns={
@@ -187,6 +201,7 @@ def summary_metrics(df: pd.DataFrame, selected_talents):
         },
         inplace=True,
     )
+    breakdown = breakdown[["Model", "Bans", "Today", "Last 12h", "Last 4h", "Last hour"]]
     st.caption("Breakdown by model and recent activity")
     st.dataframe(breakdown, use_container_width=True, hide_index=True)
 
@@ -209,7 +224,24 @@ def time_series_chart(df: pd.DataFrame, granularity: str):
         .encode(
             x=alt.X("period:T", title="Date & time" if granularity == "Hourly" else "Date"),
             y=alt.Y("count:Q", title=f"Bans per {granularity.lower()}"),
-            color=alt.Color("talent:N", title="Model"),
+            color=alt.Color(
+                "talent:N",
+                title="Model",
+                scale=alt.Scale(
+                    range=[
+                        "#F97068",
+                        "#577590",
+                        "#43AA8B",
+                        "#F9C74F",
+                        "#9B5DE5",
+                        "#F9844A",
+                        "#90BE6D",
+                        "#277DA1",
+                        "#F94144",
+                        "#EF476F",
+                    ]
+                ),
+            ),
             tooltip=["period:T", "talent:N", "count:Q"],
         )
     )
@@ -227,17 +259,29 @@ def distribution_charts(df: pd.DataFrame):
         ("platform", "Device Manufacturer"),
         ("talent", "Model"),
     ]
+    model_palette = [
+        "#F97068",
+        "#577590",
+        "#43AA8B",
+        "#F9C74F",
+        "#9B5DE5",
+        "#F9844A",
+        "#90BE6D",
+        "#277DA1",
+        "#F94144",
+        "#EF476F",
+    ]
 
     for idx, (column, label) in enumerate(chart_specs):
         if column not in df.columns:
             chart_columns[idx].info(f"No data for {label.lower()}.")
             continue
         data = (
-            df[column]
-            .fillna("Unknown")
-            .value_counts()
-            .reset_index()
-            .rename(columns={"index": "category", column: "Bans"})
+            df.assign(category=df[column].fillna("Unknown"))
+            .groupby("category")
+            .size()
+            .reset_index(name="Bans")
+            .sort_values("Bans", ascending=False)
         )
         if data.empty:
             chart_columns[idx].info(f"No data for {label.lower()}.")
@@ -248,12 +292,15 @@ def distribution_charts(df: pd.DataFrame):
             chart_columns[idx].info(f"No data for {label.lower()}.")
             continue
         data["Share"] = data["Bans"] / total_bans
+        color_kwargs = {"title": label}
+        if label == "Model":
+            color_kwargs["scale"] = alt.Scale(range=model_palette)
         chart = (
             alt.Chart(data)
             .mark_arc(innerRadius=50)
             .encode(
                 theta=alt.Theta("Bans:Q", stack=True),
-                color=alt.Color("category:N", title=label),
+                color=alt.Color("category:N", **color_kwargs),
                 tooltip=[
                     alt.Tooltip("category:N", title=label),
                     alt.Tooltip("Bans:Q", title="Bans"),
@@ -314,11 +361,11 @@ def main():
     filtered_df, selected_talents = sidebar_filters(df)
 
     summary_metrics(filtered_df, selected_talents)
-    distribution_charts(filtered_df)
     st.subheader("Trends")
     granularity = st.radio("Time granularity", ["Daily", "Hourly"], horizontal=True)
     time_series_chart(filtered_df, granularity)
 
+    distribution_charts(filtered_df)
     st.subheader("Ban Details")
     bans_table(filtered_df)
 
