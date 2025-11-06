@@ -8,6 +8,8 @@ DEFAULT_EMILY_TABLE = os.getenv("NOCODB_TABLE_ID_EMILY", "m5uejvzfy8wa2ku")
 DEFAULT_EMILY_VIEW = os.getenv("NOCODB_VIEW_ID_EMILY", "vwxzmxmeludlbp1r")
 DEFAULT_ERIC_TABLE = os.getenv("NOCODB_TABLE_ID_ERIC", "mwr6v21uxqu16yh")
 DEFAULT_ERIC_VIEW = os.getenv("NOCODB_VIEW_ID_ERIC", "vwgqx8nx1e149t0k")
+DEFAULT_BARBARA_TABLE = os.getenv("NOCODB_TABLE_ID_BARBARA", "m0u8k45v9bhbtvr")
+DEFAULT_BARBARA_VIEW = os.getenv("NOCODB_VIEW_ID_BARBARA", "vwszb03hescjs3dr")
 APP_TZ    = os.getenv("APP_TZ", "UTC")
 
 DB_PATH = Path("data/bans.db")
@@ -18,6 +20,7 @@ HEADERS = {"xc-token": API_TOKEN, "accept": "application/json"}
 SOURCES = [
     {"label": "Emily", "table_id": DEFAULT_EMILY_TABLE, "view_id": DEFAULT_EMILY_VIEW},
     {"label": "Eric", "table_id": DEFAULT_ERIC_TABLE, "view_id": DEFAULT_ERIC_VIEW},
+    {"label": "Barbara", "table_id": DEFAULT_BARBARA_TABLE, "view_id": DEFAULT_BARBARA_VIEW},
 ]
 LEGACY_TABLE_ID = os.getenv("NOCODB_TABLE_ID")
 LEGACY_VIEW_ID = os.getenv("NOCODB_VIEW_ID")
