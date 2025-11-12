@@ -19,7 +19,43 @@ def load_env_file(path=".env"):
             value = value[1:-1]
         os.environ.setdefault(key, value)
 
+def load_streamlit_secrets():
+    try:
+        import streamlit as st  # type: ignore
+        secrets = getattr(st, "secrets", None)
+    except ModuleNotFoundError:
+        return
+    except Exception:
+        return
+    if secrets is None:
+        return
+    try:
+        keys = list(secrets.keys())
+    except Exception:
+        return
+
+    def assign(key, value):
+        if value is None:
+            return
+        os.environ.setdefault(key.upper(), str(value))
+
+    for key in keys:
+        try:
+            value = secrets[key]
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            for sub_key, sub_val in value.items():
+                combined = f"{key}_{sub_key}".upper()
+                if combined.startswith("AIRTABLE_"):
+                    assign(combined, sub_val)
+        else:
+            key_upper = key.upper()
+            if key_upper.startswith("AIRTABLE_"):
+                assign(key_upper, value)
+
 load_env_file()
+load_streamlit_secrets()
 
 AIRTABLE_API_URL = os.getenv("AIRTABLE_API_URL", "https://api.airtable.com/v0")
 AIRTABLE_ACCESS_TOKEN = os.getenv("AIRTABLE_ACCESS_TOKEN")
