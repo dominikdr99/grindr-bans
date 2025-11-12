@@ -44,13 +44,17 @@ def load_streamlit_secrets():
             value = secrets[key]
         except Exception:
             continue
+        key_upper = key.upper()
+        prefixed_key = key_upper if key_upper.startswith("AIRTABLE_") else f"AIRTABLE_{key_upper}"
         if isinstance(value, dict):
             for sub_key, sub_val in value.items():
-                combined = f"{key}_{sub_key}".upper()
+                combined = f"{key_upper}_{sub_key}".upper()
+                prefixed_combined = combined if combined.startswith("AIRTABLE_") else f"AIRTABLE_{combined}"
+                assign(prefixed_combined, sub_val)
                 if combined.startswith("AIRTABLE_"):
                     assign(combined, sub_val)
         else:
-            key_upper = key.upper()
+            assign(prefixed_key, value)
             if key_upper.startswith("AIRTABLE_"):
                 assign(key_upper, value)
 
