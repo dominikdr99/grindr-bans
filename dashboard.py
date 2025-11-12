@@ -483,7 +483,11 @@ def main():
         layout="wide",
     )
     st.title("🚫 Ban Monitor Dashboard")
-    st.caption("Explore bans pulled directly from NocoDB.")
+    if st.button("Refresh Airtable data", type="primary"):
+        load_bans.clear()
+        st.rerun()
+
+    st.caption("Explore bans pulled directly from Airtable bases.")
 
     try:
         df = load_bans()
