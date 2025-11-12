@@ -1,34 +1,80 @@
-import os, sys, json, sqlite3, requests, datetime as dt
+import os, sys, sqlite3, requests, datetime as dt
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-BASE_URL = os.getenv("NOCODB_BASE_URL", "https://nocodb.fanworkz.com/")
-API_TOKEN = os.getenv("NOCODB_API_TOKEN", "_U5A02swoTddDJDEAMN5g2gaUg8rFe4IKAtWNh4e")
-DEFAULT_EMILY_TABLE = os.getenv("NOCODB_TABLE_ID_EMILY", "m5uejvzfy8wa2ku")
-DEFAULT_EMILY_VIEW = os.getenv("NOCODB_VIEW_ID_EMILY", "vwxzmxmeludlbp1r")
-DEFAULT_ERIC_TABLE = os.getenv("NOCODB_TABLE_ID_ERIC", "mwr6v21uxqu16yh")
-DEFAULT_ERIC_VIEW = os.getenv("NOCODB_VIEW_ID_ERIC", "vwgqx8nx1e149t0k")
-DEFAULT_BARBARA_TABLE = os.getenv("NOCODB_TABLE_ID_BARBARA", "m0u8k45v9bhbtvr")
-DEFAULT_BARBARA_VIEW = os.getenv("NOCODB_VIEW_ID_BARBARA", "vwszb03hescjs3dr")
+def load_env_file(path=".env"):
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+load_env_file()
+
+AIRTABLE_API_URL = os.getenv("AIRTABLE_API_URL", "https://api.airtable.com/v0")
+AIRTABLE_ACCESS_TOKEN = os.getenv("AIRTABLE_ACCESS_TOKEN")
+DEFAULT_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+DEFAULT_TABLE_ID = os.getenv("AIRTABLE_ACCOUNTS_TABLE_ID")
+DEFAULT_VIEW_NAME = os.getenv("AIRTABLE_ACCOUNTS_VIEW", "Banned Accounts")
 APP_TZ    = os.getenv("APP_TZ", "UTC")
 
 DB_PATH = Path("data/bans.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-HEADERS = {"xc-token": API_TOKEN, "accept": "application/json"}
+HEADERS = {
+    "Authorization": f"Bearer {AIRTABLE_ACCESS_TOKEN or ''}",
+    "Accept": "application/json",
+}
 
-SOURCES = [
-    {"label": "Emily", "table_id": DEFAULT_EMILY_TABLE, "view_id": DEFAULT_EMILY_VIEW},
-    {"label": "Eric", "table_id": DEFAULT_ERIC_TABLE, "view_id": DEFAULT_ERIC_VIEW},
-    {"label": "Barbara", "table_id": DEFAULT_BARBARA_TABLE, "view_id": DEFAULT_BARBARA_VIEW},
-]
-LEGACY_TABLE_ID = os.getenv("NOCODB_TABLE_ID")
-LEGACY_VIEW_ID = os.getenv("NOCODB_VIEW_ID")
-if LEGACY_TABLE_ID:
-    SOURCES.insert(0, {"label": "Default", "table_id": LEGACY_TABLE_ID, "view_id": LEGACY_VIEW_ID})
-SOURCES = [s for s in SOURCES if s.get("table_id")]
+def _env_key(label):
+    return label.upper().replace(" ", "_")
 
-# ---- Adjust this map to your real NocoDB column names ----
+def load_sources():
+    sources = []
+    configured_labels = [
+        lbl.strip()
+        for lbl in os.getenv("AIRTABLE_SOURCES", "").split(",")
+        if lbl.strip()
+    ]
+    if not configured_labels:
+        base_id = os.getenv("AIRTABLE_BASE_ID")
+        if base_id and DEFAULT_TABLE_ID:
+            sources.append({
+                "label": os.getenv("AIRTABLE_DEFAULT_LABEL", "Default"),
+                "base_id": base_id,
+                "table_id": DEFAULT_TABLE_ID,
+                "view": DEFAULT_VIEW_NAME,
+            })
+        return sources
+
+    for label in configured_labels:
+        key = _env_key(label)
+        base_id = os.getenv(f"AIRTABLE_{key}_BASE_ID", os.getenv("AIRTABLE_BASE_ID"))
+        table_id = os.getenv(f"AIRTABLE_{key}_TABLE_ID", DEFAULT_TABLE_ID)
+        view_name = os.getenv(f"AIRTABLE_{key}_VIEW", DEFAULT_VIEW_NAME)
+        if not base_id or not table_id:
+            raise RuntimeError(f"Missing Airtable env vars for {label}: need base + table IDs")
+        sources.append({
+            "label": label,
+            "base_id": base_id,
+            "table_id": table_id,
+            "view": view_name,
+        })
+    return sources
+
+SOURCES = load_sources()
+
+# ---- Adjust this map to your real Airtable column names ----
 FIELD_MAP = {
     "account_id": ["account_id", "id", "acc_id"],
     "username":   ["username", "user", "handle", "Display Name", "Dislpay Name"],
@@ -53,21 +99,26 @@ def pick(d, keys, default=None):
             return d[k]
     return DEFAULTS.get(keys[0], default)
 
-def fetch_records(table_id, limit=1000, view_id=None):
-    items, offset = [], 0
+def fetch_records(base_id, table_id, view_name=None, page_size=100):
+    items = []
+    params = {"pageSize": page_size}
+    if view_name:
+        params["view"] = view_name
+    offset = None
     while True:
-        params = {"limit": limit, "offset": offset}
-        if view_id:
-            params["viewId"] = view_id
-        url = f"{BASE_URL}/api/v2/tables/{table_id}/records"
+        if offset:
+            params["offset"] = offset
+        url = f"{AIRTABLE_API_URL}/{base_id}/{table_id}"
         r = requests.get(url, params=params, headers=HEADERS, timeout=30)
         r.raise_for_status()
         data = r.json()
-        rows = data.get("list", data if isinstance(data, list) else [])
-        if not rows: break
+        rows = data.get("records", [])
+        if not rows:
+            break
         items.extend(rows)
-        if len(rows) < limit: break
-        offset += limit
+        offset = data.get("offset")
+        if not offset:
+            break
     return items
 
 def parse_dt_iso(s):
@@ -85,16 +136,17 @@ def to_local(ts_utc):
     return ts_utc.astimezone(ZoneInfo(APP_TZ))
 
 def normalize_row(r, talent=None):
+    fields = r.get("fields", r)
     row = {
-        "account_id": pick(r, FIELD_MAP["account_id"]),
-        "username":   pick(r, FIELD_MAP["username"]),
-        "email":      pick(r, FIELD_MAP["email"]),
-        "about_me":   pick(r, FIELD_MAP["about_me"]),
-        "model":      pick(r, FIELD_MAP["model"], "Unknown"),
-        "platform":   pick(r, FIELD_MAP["platform"], "Unknown"),
-        "reason":     pick(r, FIELD_MAP["reason"], "Unknown"),
-        "status":     pick(r, FIELD_MAP["status"], "banned"),
-        "banned_at":  pick(r, FIELD_MAP["banned_at"]),
+        "account_id": pick(fields, FIELD_MAP["account_id"]),
+        "username":   pick(fields, FIELD_MAP["username"]),
+        "email":      pick(fields, FIELD_MAP["email"]),
+        "about_me":   pick(fields, FIELD_MAP["about_me"]),
+        "model":      pick(fields, FIELD_MAP["model"], "Unknown"),
+        "platform":   pick(fields, FIELD_MAP["platform"], "Unknown"),
+        "reason":     pick(fields, FIELD_MAP["reason"], "Unknown"),
+        "status":     pick(fields, FIELD_MAP["status"], "banned"),
+        "banned_at":  pick(fields, FIELD_MAP["banned_at"]),
         "talent":     talent or "Unknown",
     }
     if not row["account_id"]:
@@ -237,21 +289,20 @@ def rebuild_aggregates(conn):
     conn.commit()
 
 def main():
-    if not (BASE_URL and API_TOKEN):
-        print("Missing env vars NOCODB_BASE_URL or NOCODB_API_TOKEN", file=sys.stderr)
+    if not AIRTABLE_ACCESS_TOKEN:
+        print("Missing env var AIRTABLE_ACCESS_TOKEN", file=sys.stderr)
         sys.exit(1)
     if not SOURCES:
-        print("No NocoDB sources configured.", file=sys.stderr)
+        print("No Airtable sources configured. Set AIRTABLE_SOURCES or AIRTABLE_BASE_ID + AIRTABLE_ACCOUNTS_TABLE_ID.", file=sys.stderr)
         sys.exit(1)
 
     all_rows = []
     for source in SOURCES:
-        table_id = source.get("table_id")
-        if not table_id:
-            continue
         label = source.get("label") or "Unknown"
-        view_id = source.get("view_id")
-        records = fetch_records(table_id=table_id, view_id=view_id)
+        base_id = source["base_id"]
+        table_id = source["table_id"]
+        view_name = source.get("view")
+        records = fetch_records(base_id=base_id, table_id=table_id, view_name=view_name)
         rows = [normalize_row(r, talent=label) for r in records]
         all_rows.extend(rows)
         print(f"[INFO] Loaded {len(rows)} rows for {label}")

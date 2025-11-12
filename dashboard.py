@@ -6,7 +6,7 @@ import altair as alt
 import requests
 
 from monitor import SOURCES, fetch_records, normalize_row
-API_ERROR_HELP = "Verify Streamlit secrets or environment variables for NocoDB access and redeploy."
+API_ERROR_HELP = "Verify Airtable credentials (env or hardcoded) before redeploying."
 
 
 def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
@@ -14,19 +14,20 @@ def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
     missing_sources = True
     for source in sources:
         table_id = source.get("table_id")
-        if not table_id:
+        base_id = source.get("base_id")
+        if not table_id or not base_id:
             continue
         missing_sources = False
         label = source.get("label") or "Unknown"
-        view_id = source.get("view_id")
+        view_name = source.get("view")
         try:
-            records = fetch_records(table_id=table_id, view_id=view_id)
+            records = fetch_records(base_id=base_id, table_id=table_id, view_name=view_name)
         except requests.RequestException as exc:
             raise RuntimeError(f"Failed to pull data for {label}: {exc}") from exc
         rows.extend(normalize_row(record, talent=label) for record in records)
 
     if missing_sources:
-        raise RuntimeError("No NocoDB sources configured.")
+        raise RuntimeError("No Airtable sources configured.")
 
     return rows
 
@@ -34,7 +35,7 @@ def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
 @st.cache_data(ttl=1800)
 def load_bans() -> pd.DataFrame:
     if not SOURCES:
-        raise RuntimeError("No NocoDB sources configured.")
+        raise RuntimeError("No Airtable sources configured.")
 
     df = pd.DataFrame(fetch_all_sources(SOURCES))
     if df.empty:
