@@ -105,15 +105,20 @@ def active_accounts_metrics(df: pd.DataFrame):
     )
     total_active = data["account_id"].nunique()
 
-    # First metric: total active accounts, then per-model metrics in rows of 4.
     items: list[tuple[str, int]] = [("Total active accounts", total_active)]
     items.extend((talent, int(total)) for talent, total in counts.items())
 
-    per_row = 4
-    for start in range(0, len(items), per_row):
-        cols = st.columns(min(per_row, len(items) - start))
-        for idx, (label, value) in enumerate(items[start : start + per_row]):
+    def render_row(row_items: list[tuple[str, int]]):
+        cols = st.columns(len(row_items))
+        for idx, (label, value) in enumerate(row_items):
             cols[idx].metric(label, f"{value:,}")
+
+    # First row: total + up to 3 top models
+    render_row(items[: min(4, len(items))])
+    # Remaining models in rows of 4
+    rest = items[4:]
+    for start in range(0, len(rest), 4):
+        render_row(rest[start : start + 4])
 
 
 def sidebar_filters(df: pd.DataFrame):
@@ -659,6 +664,8 @@ def main():
         active_df = pd.DataFrame()
 
     active_accounts_metrics(active_df)
+    st.divider()
+    st.subheader("Banned Accounts")
     filtered_df, _ = sidebar_filters(df)
 
     summary_metrics(df)
