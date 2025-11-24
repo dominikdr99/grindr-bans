@@ -108,17 +108,9 @@ def active_accounts_metrics(df: pd.DataFrame):
     items: list[tuple[str, int]] = [("Total active accounts", total_active)]
     items.extend((talent, int(total)) for talent, total in counts.items())
 
-    def render_row(row_items: list[tuple[str, int]]):
-        cols = st.columns(len(row_items))
-        for idx, (label, value) in enumerate(row_items):
-            cols[idx].metric(label, f"{value:,}")
-
-    # First row: total + up to 3 top models
-    render_row(items[: min(4, len(items))])
-    # Remaining models in rows of 4
-    rest = items[4:]
-    for start in range(0, len(rest), 4):
-        render_row(rest[start : start + 4])
+    cols = st.columns(len(items))
+    for idx, (label, value) in enumerate(items):
+        cols[idx].metric(label, f"{value:,}")
 
 
 def sidebar_filters(df: pd.DataFrame):
