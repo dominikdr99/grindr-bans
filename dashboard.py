@@ -56,6 +56,22 @@ def load_bans() -> pd.DataFrame:
         df["previous_location"] = df["previous_location"].apply(
             lambda val: val.strip() if isinstance(val, str) and val.strip() else None
         )
+    # Ensure downstream tables always have expected columns; do not overwrite real data.
+    for col in (
+        "previous_location",
+        "previous_country",
+        "banned_at_local",
+        "talent",
+        "account_id",
+        "username",
+        "email",
+        "model",
+        "platform",
+        "reason",
+        "about_me",
+    ):
+        if col not in df.columns:
+            df[col] = None
     return df
 
 
