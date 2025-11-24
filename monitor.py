@@ -66,6 +66,7 @@ AIRTABLE_ACCESS_TOKEN = os.getenv("AIRTABLE_ACCESS_TOKEN")
 DEFAULT_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 DEFAULT_TABLE_ID = os.getenv("AIRTABLE_ACCOUNTS_TABLE_ID")
 DEFAULT_VIEW_NAME = os.getenv("AIRTABLE_ACCOUNTS_VIEW", "Banned Accounts")
+ACTIVE_VIEW_NAME = os.getenv("AIRTABLE_ACTIVE_VIEW", "Active Accounts")
 APP_TZ    = os.getenv("APP_TZ", "UTC")
 
 DB_PATH = Path("data/bans.db")

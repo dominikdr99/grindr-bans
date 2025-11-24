@@ -5,11 +5,11 @@ import streamlit as st
 import altair as alt
 import requests
 
-from monitor import SOURCES, fetch_records, normalize_row
+from monitor import SOURCES, ACTIVE_VIEW_NAME, fetch_records, normalize_row
 API_ERROR_HELP = "Verify Airtable credentials (env or hardcoded) before redeploying."
 
 
-def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
+def fetch_all_sources(sources: Iterable[dict], view_override: str | None = None) -> list[dict]:
     rows: list[dict] = []
     missing_sources = True
     for source in sources:
@@ -19,7 +19,7 @@ def fetch_all_sources(sources: Iterable[dict]) -> list[dict]:
             continue
         missing_sources = False
         label = source.get("label") or "Unknown"
-        view_name = source.get("view")
+        view_name = view_override or source.get("view")
         try:
             records = fetch_records(base_id=base_id, table_id=table_id, view_name=view_name)
         except requests.RequestException as exc:
@@ -73,6 +73,39 @@ def load_bans() -> pd.DataFrame:
         if col not in df.columns:
             df[col] = None
     return df
+
+
+@st.cache_data(ttl=1800)
+def load_active_accounts(view_name: str = ACTIVE_VIEW_NAME) -> pd.DataFrame:
+    if not SOURCES:
+        raise RuntimeError("No Airtable sources configured.")
+    rows = fetch_all_sources(SOURCES, view_override=view_name)
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    # Keep only columns we care about for counting.
+    needed_cols = ["talent", "account_id"]
+    for col in needed_cols:
+        if col not in df.columns:
+            df[col] = None
+    return df[needed_cols]
+
+
+def active_accounts_metrics(df: pd.DataFrame):
+    st.subheader("Active Accounts by Model")
+    if df.empty:
+        st.info("No active accounts available. Confirm the 'Active Accounts' view contains data.")
+        return
+    counts = (
+        df.fillna({"talent": "Unknown"})
+        .groupby("talent")["account_id"]
+        .nunique()
+        .sort_values(ascending=False)
+    )
+    cols = st.columns(max(1, min(4, len(counts))))
+    for idx, (talent, total) in enumerate(counts.items()):
+        col = cols[idx % len(cols)]
+        col.metric(f"{talent}", f"{total:,}")
 
 
 def sidebar_filters(df: pd.DataFrame):
@@ -611,6 +644,13 @@ def main():
         st.info("No bans available yet. Confirm your NocoDB tables contain data.")
         return
 
+    try:
+        active_df = load_active_accounts()
+    except RuntimeError as exc:
+        st.warning(f"Active accounts unavailable: {exc}")
+        active_df = pd.DataFrame()
+
+    active_accounts_metrics(active_df)
     filtered_df, _ = sidebar_filters(df)
 
     summary_metrics(df)
