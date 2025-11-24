@@ -570,7 +570,7 @@ def country_ban_rates(df: pd.DataFrame):
         st.dataframe(per_model[display_cols], use_container_width=True, hide_index=True)
 
 
-def top_locations_table(df: pd.DataFrame, limit: int | None = None):
+def top_locations_table(df: pd.DataFrame):
     if df.empty or "previous_location" not in df.columns:
         return
     data = df.copy()
@@ -590,8 +590,7 @@ def top_locations_table(df: pd.DataFrame, limit: int | None = None):
             "bans": "Bans",
         }
     )
-    title = "Locations by Bans" if limit is None else f"Top {limit} Locations by Bans"
-    st.subheader(title)
+    st.subheader("Locations by Bans")
     grouped.insert(0, "#", range(1, len(grouped) + 1))
     st.dataframe(grouped, use_container_width=True, hide_index=True)
 
@@ -674,7 +673,7 @@ def main():
 
     distribution_charts(filtered_df)
     country_ban_rates(filtered_df)
-    top_locations_table(filtered_df, limit=20)
+    top_locations_table(filtered_df)
     st.subheader("Ban Details")
     bans_table(filtered_df)
 
