@@ -592,6 +592,9 @@ def top_locations_table(df: pd.DataFrame, limit: int | None = None):
     )
     title = "Locations by Bans" if limit is None else f"Top {limit} Locations by Bans"
     st.subheader(title)
+    if limit is not None:
+        grouped = grouped.head(limit)
+    grouped.insert(0, "#", range(1, len(grouped) + 1))
     st.dataframe(grouped, use_container_width=True, hide_index=True)
 
 
