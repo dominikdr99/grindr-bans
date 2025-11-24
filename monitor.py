@@ -123,6 +123,8 @@ FIELD_MAP = {
     "model":      ["model", "Associated Model", "OnlyFans model", "device_model", "Device Model"],
     "platform":   ["platform", "source_app", "app", "device_manufacturer", "Device Manufacturer"],
     "reason":     ["reason", "ban_reason", "Ban Reason"],
+    "previous_location": ["previous_location", "Previous Location"],
+    "previous_country": ["previous_country", "Previous Country"],
     "status":     ["status"],
     "banned_at":  ["banned_at", "created_at", "updated_at", "Ban Time"],
 }
@@ -175,6 +177,26 @@ def to_local(ts_utc):
         ts_utc = ts_utc.replace(tzinfo=dt.timezone.utc)
     return ts_utc.astimezone(ZoneInfo(APP_TZ))
 
+COUNTRY_MAP = {
+    "USA": "USA",
+    "US": "USA",
+    "UNITED STATES": "USA",
+    "CAN": "CAN",
+    "CA": "CAN",
+    "CANADA": "CAN",
+    "AUS": "AUS",
+    "AU": "AUS",
+    "AUSTRALIA": "AUS",
+    "EU": "EU",
+    "EUROPE": "EU",
+}
+
+def normalize_country(value):
+    if not value:
+        return None
+    cleaned = str(value).strip().upper()
+    return COUNTRY_MAP.get(cleaned, cleaned if cleaned in COUNTRY_MAP.values() else None)
+
 def normalize_row(r, talent=None):
     fields = r.get("fields", r)
     row = {
@@ -185,6 +207,8 @@ def normalize_row(r, talent=None):
         "model":      pick(fields, FIELD_MAP["model"], "Unknown"),
         "platform":   pick(fields, FIELD_MAP["platform"], "Unknown"),
         "reason":     pick(fields, FIELD_MAP["reason"], "Unknown"),
+        "previous_location": pick(fields, FIELD_MAP["previous_location"]),
+        "previous_country": normalize_country(pick(fields, FIELD_MAP["previous_country"])),
         "status":     pick(fields, FIELD_MAP["status"], "banned"),
         "banned_at":  pick(fields, FIELD_MAP["banned_at"]),
         "talent":     talent or "Unknown",
@@ -213,6 +237,8 @@ def init_db(conn):
       username   TEXT,
       email      TEXT,
       about_me   TEXT,
+      previous_location TEXT,
+      previous_country  TEXT,
       model      TEXT,
       platform   TEXT,
       reason     TEXT,
@@ -226,6 +252,8 @@ def init_db(conn):
     columns = ensure_columns(cur, "bans", {
         "email": "TEXT",
         "about_me": "TEXT",
+        "previous_location": "TEXT",
+        "previous_country": "TEXT",
         "talent": "TEXT",
     })
     if "talent" in columns:
@@ -268,12 +296,13 @@ def upsert_bans(conn, rows):
     if not rows:
         return 0
     q = """INSERT OR IGNORE INTO bans
-           (account_id, username, email, about_me, model, platform, reason, status, talent, banned_at_utc, banned_at_local)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"""
+           (account_id, username, email, about_me, previous_location, previous_country, model, platform, reason, status, talent, banned_at_utc, banned_at_local)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"""
     data = []
     for r in rows:
         data.append((
             r["account_id"], r["username"], r["email"], r["about_me"],
+            r.get("previous_location"), r.get("previous_country"),
             r["model"], r["platform"], r["reason"], r["status"], r["talent"],
             r["banned_at_utc"], r["banned_at_local"]
         ))

@@ -46,6 +46,16 @@ def load_bans() -> pd.DataFrame:
         df["banned_at_local"] = df["banned_at_local"].dt.tz_convert(None)
     df["talent"] = df["talent"].fillna("Unknown")
     df["banned_date"] = df["banned_at_local"].dt.date
+    if "previous_country" in df.columns:
+        valid_countries = {"USA", "CAN", "AUS", "EU"}
+        df["previous_country"] = df["previous_country"].apply(
+            lambda val: str(val).strip().upper() if pd.notna(val) else None
+        )
+        df.loc[~df["previous_country"].isin(valid_countries), "previous_country"] = None
+    if "previous_location" in df.columns:
+        df["previous_location"] = df["previous_location"].apply(
+            lambda val: val.strip() if isinstance(val, str) and val.strip() else None
+        )
     return df
 
 
@@ -448,6 +458,89 @@ def distribution_charts(df: pd.DataFrame):
         chart_columns[idx].altair_chart(chart, use_container_width=True)
 
 
+def country_ban_rates(df: pd.DataFrame):
+    st.subheader("Ban Rate by Country")
+    if df.empty or "previous_country" not in df.columns or "previous_location" not in df.columns:
+        st.info("Ban rate by country will appear once location data is available.")
+        return
+
+    total_locations_by_country = {"USA": 250, "CAN": 60, "AUS": 40, "EU": 150}
+    valid_countries = {"USA", "CAN", "AUS", "EU"}
+    data = df[df["previous_country"].isin(valid_countries)].copy()
+    if data.empty:
+        st.info("No country data available for the current filters.")
+        return
+
+    def count_locations(series: pd.Series) -> int:
+        return series.dropna().nunique()
+
+    grouped = (
+        data.groupby(["talent", "previous_country"])
+        .agg(bans=("account_id", "count"), seen_locations=("previous_location", count_locations))
+        .reset_index()
+    )
+    overall = (
+        data.groupby("previous_country")
+        .agg(bans=("account_id", "count"), seen_locations=("previous_location", count_locations))
+        .reset_index()
+        .assign(talent="All models")
+    )
+    rates = pd.concat([overall, grouped], ignore_index=True, sort=False)
+    if rates.empty:
+        st.info("No country data available for the current filters.")
+        return
+
+    rates["locations"] = rates["previous_country"].map(total_locations_by_country).fillna(0).astype(int)
+    rates["seen_locations"] = rates["seen_locations"].fillna(0).astype(int)
+    rates["bans"] = rates["bans"].fillna(0).astype(int)
+    rates["ban_rate"] = rates.apply(
+        lambda row: row["bans"] / row["locations"] if row["locations"] else None, axis=1
+    )
+    rates["Model"] = rates["talent"].fillna("Unknown")
+    rates["Country"] = rates["previous_country"]
+    rates["Locations (cities)"] = rates["locations"]
+    rates["Bans"] = rates["bans"]
+    rates["Ban Rate"] = rates["ban_rate"].apply(lambda val: f"{val:.2f}" if val is not None else "N/A")
+    rates["model_sort"] = rates["Model"].apply(lambda val: "" if val == "All models" else val)
+    rates = rates.sort_values(["model_sort", "ban_rate"], ascending=[True, False])
+    display_cols = ["Model", "Country", "Bans", "Ban Rate"]
+    st.caption("Calculated as total bans in a country divided by fixed city counts (USA 250, CAN 60, AUS 40, EU 150).")
+
+    overall = rates[rates["Model"] == "All models"]
+    per_model = rates[rates["Model"] != "All models"]
+    if not overall.empty:
+        st.markdown("**All models**")
+        st.dataframe(overall[display_cols], use_container_width=True, hide_index=True)
+    if not per_model.empty:
+        st.markdown("**Per model**")
+        st.dataframe(per_model[display_cols], use_container_width=True, hide_index=True)
+
+
+def top_locations_table(df: pd.DataFrame, limit: int | None = None):
+    if df.empty or "previous_location" not in df.columns:
+        return
+    data = df.copy()
+    data["previous_location"] = data["previous_location"].fillna("Unknown")
+    grouped = (
+        data.groupby(["previous_location", "previous_country"], dropna=False)
+        .agg(bans=("account_id", "count"))
+        .reset_index()
+        .sort_values("bans", ascending=False)
+    )
+    if grouped.empty:
+        return
+    grouped = grouped.rename(
+        columns={
+            "previous_location": "Location",
+            "previous_country": "Country",
+            "bans": "Bans",
+        }
+    )
+    title = "Locations by Bans" if limit is None else f"Top {limit} Locations by Bans"
+    st.subheader(title)
+    st.dataframe(grouped, use_container_width=True, hide_index=True)
+
+
 def bans_table(df: pd.DataFrame):
     display_df = df[
         [
@@ -456,6 +549,8 @@ def bans_table(df: pd.DataFrame):
             "account_id",
             "username",
             "email",
+            "previous_location",
+            "previous_country",
             "model",
             "platform",
             "reason",
@@ -467,6 +562,8 @@ def bans_table(df: pd.DataFrame):
             "talent": "Model",
             "account_id": "Account ID",
             "username": "Display Name",
+            "previous_location": "Previous Location",
+            "previous_country": "Previous Country",
             "model": "Device Model",
             "platform": "Device Manufacturer",
             "reason": "Ban Reason",
@@ -512,6 +609,8 @@ def main():
     time_series_chart(filtered_df, granularity)
 
     distribution_charts(filtered_df)
+    country_ban_rates(filtered_df)
+    top_locations_table(filtered_df, limit=20)
     st.subheader("Ban Details")
     bans_table(filtered_df)
 
