@@ -92,20 +92,28 @@ def load_active_accounts(view_name: str = ACTIVE_VIEW_NAME) -> pd.DataFrame:
 
 
 def active_accounts_metrics(df: pd.DataFrame):
-    st.subheader("Active Accounts by Model")
+    st.subheader("Active Accounts")
+    st.caption("Current counts from the Active Accounts view (not affected by dashboard filters).")
     if df.empty:
         st.info("No active accounts available. Confirm the 'Active Accounts' view contains data.")
         return
+    data = df.fillna({"talent": "Unknown"})
     counts = (
-        df.fillna({"talent": "Unknown"})
-        .groupby("talent")["account_id"]
+        data.groupby("talent")["account_id"]
         .nunique()
         .sort_values(ascending=False)
     )
-    cols = st.columns(max(1, min(4, len(counts))))
-    for idx, (talent, total) in enumerate(counts.items()):
-        col = cols[idx % len(cols)]
-        col.metric(f"{talent}", f"{total:,}")
+    total_active = data["account_id"].nunique()
+
+    # First metric: total active accounts, then per-model metrics in rows of 4.
+    items: list[tuple[str, int]] = [("Total active accounts", total_active)]
+    items.extend((talent, int(total)) for talent, total in counts.items())
+
+    per_row = 4
+    for start in range(0, len(items), per_row):
+        cols = st.columns(min(per_row, len(items) - start))
+        for idx, (label, value) in enumerate(items[start : start + per_row]):
+            cols[idx].metric(label, f"{value:,}")
 
 
 def sidebar_filters(df: pd.DataFrame):
