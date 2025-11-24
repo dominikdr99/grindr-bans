@@ -542,21 +542,25 @@ def top_locations_table(df: pd.DataFrame, limit: int | None = None):
 
 
 def bans_table(df: pd.DataFrame):
-    display_df = df[
-        [
-            "banned_at_local",
-            "talent",
-            "account_id",
-            "username",
-            "email",
-            "previous_location",
-            "previous_country",
-            "model",
-            "platform",
-            "reason",
-            "about_me",
-        ]
-    ].rename(
+    required_cols = {
+        "banned_at_local": None,
+        "talent": "Unknown",
+        "account_id": None,
+        "username": None,
+        "email": None,
+        "previous_location": None,
+        "previous_country": None,
+        "model": "Unknown",
+        "platform": "Unknown",
+        "reason": None,
+        "about_me": None,
+    }
+    display_df = df.copy()
+    for col, default in required_cols.items():
+        if col not in display_df.columns:
+            display_df[col] = default
+
+    display_df = display_df[list(required_cols)].rename(
         columns={
             "banned_at_local": "Banned At",
             "talent": "Model",
