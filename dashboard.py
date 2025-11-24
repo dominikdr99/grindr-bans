@@ -570,7 +570,7 @@ def country_ban_rates(df: pd.DataFrame):
         st.dataframe(per_model[display_cols], use_container_width=True, hide_index=True)
 
 
-def top_locations_table(df: pd.DataFrame, limit: int):
+def top_locations_table(df: pd.DataFrame):
     if df.empty or "previous_location" not in df.columns:
         return
     data = df.copy()
@@ -590,12 +590,37 @@ def top_locations_table(df: pd.DataFrame, limit: int):
             "bans": "Bans",
         }
     )
-    grouped = grouped.head(max(1, int(limit)))
-    total_top = int(grouped["Bans"].sum()) if not grouped.empty else 0
-    st.subheader(f"Top {limit} Locations by Bans")
-    st.caption(f"Top {limit} locations account for {total_top} bans.")
+    st.subheader("Locations by Bans")
     grouped.insert(0, "#", range(1, len(grouped) + 1))
     st.dataframe(grouped, use_container_width=True, hide_index=True)
+
+
+def top_locations_total(df: pd.DataFrame):
+    if df.empty or "previous_location" not in df.columns:
+        return
+    data = df.copy()
+    data["previous_location"] = data["previous_location"].fillna("Unknown")
+    grouped = (
+        data.groupby(["previous_location", "previous_country"], dropna=False)
+        .agg(bans=("account_id", "count"))
+        .reset_index()
+        .sort_values("bans", ascending=False)
+    )
+    if grouped.empty:
+        return
+    location_count = grouped["previous_location"].nunique(dropna=True)
+    default_limit = min(20, location_count) if location_count else 1
+    limit = st.number_input(
+        "Top locations to sum",
+        min_value=1,
+        max_value=location_count if location_count else 1,
+        value=default_limit,
+        step=1,
+        key="top_locations_sum_limit",
+        help="Sums bans for the top N locations using current filters.",
+    )
+    top_total = int(grouped.head(int(limit))["bans"].sum())
+    st.metric(f"Top {int(limit)} locations total bans", f"{top_total:,}")
 
 
 def bans_table(df: pd.DataFrame):
@@ -676,22 +701,8 @@ def main():
 
     distribution_charts(filtered_df)
     country_ban_rates(filtered_df)
-    location_count = (
-        filtered_df["previous_location"].nunique(dropna=True) if "previous_location" in filtered_df.columns else 0
-    )
-    if location_count:
-        default_limit = min(20, location_count)
-        location_limit = st.number_input(
-            "Top locations to show",
-            min_value=1,
-            max_value=location_count,
-            value=default_limit,
-            step=1,
-            key="top_locations_limit",
-        )
-    else:
-        location_limit = 20
-    top_locations_table(filtered_df, limit=location_limit)
+    top_locations_total(filtered_df)
+    top_locations_table(filtered_df)
     st.subheader("Ban Details")
     bans_table(filtered_df)
 
