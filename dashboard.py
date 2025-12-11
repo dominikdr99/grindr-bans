@@ -8,6 +8,40 @@ import requests
 from monitor import SOURCES, ACTIVE_VIEW_NAME, fetch_records, normalize_row
 API_ERROR_HELP = "Verify Airtable credentials (env or hardcoded) before redeploying."
 
+MODEL_COLORS = {
+    "Emily": "#F97068",
+    "Eric": "#577590",
+    "Ariana": "#43AA8B",
+    "Barbara": "#F9C74F",
+    "Vitoria": "#9B5DE5",
+    "Manelyk": "#F9844A",
+}
+MODEL_COLOR_FALLBACKS = [
+    "#90BE6D",
+    "#277DA1",
+    "#F94144",
+    "#EF476F",
+    "#4D908E",
+    "#F3722C",
+    "#0081A7",
+    "#9A031E",
+]
+
+
+def build_model_color_scale(categories: Iterable[str] | None = None) -> alt.Scale:
+    palette = list(MODEL_COLORS.values()) + MODEL_COLOR_FALLBACKS
+    if categories is None:
+        return alt.Scale(range=palette)
+    ordered_categories = list(dict.fromkeys([cat for cat in categories if pd.notna(cat)]))
+    if not ordered_categories:
+        return alt.Scale(range=palette)
+    domain = [name for name in MODEL_COLORS if name in ordered_categories]
+    domain.extend([name for name in ordered_categories if name not in domain])
+    needed = len(domain)
+    repeats = (needed // len(palette)) + 1
+    full_palette = (palette * repeats)[:needed]
+    return alt.Scale(domain=domain, range=full_palette)
+
 
 def fetch_all_sources(sources: Iterable[dict], view_override: str | None = None) -> list[dict]:
     rows: list[dict] = []
@@ -122,13 +156,9 @@ def sidebar_filters(df: pd.DataFrame):
 
     talents = sorted(df["talent"].dropna().unique())
     reasons = sorted(df["reason"].dropna().unique())
-    platforms = sorted(df["platform"].dropna().unique())
-    models = sorted(df["model"].dropna().unique())
 
     talent_filter = st.sidebar.multiselect("Model", talents, default=talents)
     reason_filter = st.sidebar.multiselect("Ban reason", reasons)
-    platform_filter = st.sidebar.multiselect("Device manufacturer", platforms)
-    model_filter = st.sidebar.multiselect("Device model", models)
 
     has_timestamps = df["banned_at_local"].notna().any()
     min_date = df["banned_date"].dropna().min()
@@ -166,10 +196,6 @@ def sidebar_filters(df: pd.DataFrame):
         mask &= df["talent"].isin(selected_talents)
     if reason_filter:
         mask &= df["reason"].isin(reason_filter)
-    if platform_filter:
-        mask &= df["platform"].isin(platform_filter)
-    if model_filter:
-        mask &= df["model"].isin(model_filter)
 
     if has_timestamps:
         now = pd.Timestamp.utcnow().tz_localize(None)
@@ -367,20 +393,8 @@ def time_series_chart(df: pd.DataFrame, granularity: str):
         fields=["period"], nearest=True, on="pointermove", empty="none"
     )
 
-    color_scale = alt.Scale(
-        range=[
-            "#F97068",
-            "#577590",
-            "#43AA8B",
-            "#F9C74F",
-            "#9B5DE5",
-            "#F9844A",
-            "#90BE6D",
-            "#277DA1",
-            "#F94144",
-            "#EF476F",
-        ]
-    )
+    talents = list(dict.fromkeys(daily["talent"].dropna().tolist()))
+    color_scale = build_model_color_scale(talents)
     base = alt.Chart(daily)
     hover_region = (
         alt.Chart(summary)
@@ -453,23 +467,9 @@ def distribution_charts(df: pd.DataFrame):
         return
 
     st.subheader("Ban Distribution")
-    chart_columns = st.columns(3)
+    chart_columns = st.columns(1)
     chart_specs = [
-        ("model", "Device Model"),
-        ("platform", "Device Manufacturer"),
         ("talent", "Model"),
-    ]
-    model_palette = [
-        "#F97068",
-        "#577590",
-        "#43AA8B",
-        "#F9C74F",
-        "#9B5DE5",
-        "#F9844A",
-        "#90BE6D",
-        "#277DA1",
-        "#F94144",
-        "#EF476F",
     ]
 
     for idx, (column, label) in enumerate(chart_specs):
@@ -494,7 +494,7 @@ def distribution_charts(df: pd.DataFrame):
         data["Share"] = data["Bans"] / total_bans
         color_kwargs = {"title": label}
         if label == "Model":
-            color_kwargs["scale"] = alt.Scale(range=model_palette)
+            color_kwargs["scale"] = build_model_color_scale(data["category"].tolist())
         chart = (
             alt.Chart(data)
             .mark_arc(innerRadius=50)
@@ -633,8 +633,6 @@ def bans_table(df: pd.DataFrame):
             "email",
             "previous_location",
             "previous_country",
-            "model",
-            "platform",
             "reason",
             "about_me",
         ]
@@ -646,8 +644,6 @@ def bans_table(df: pd.DataFrame):
             "username": "Display Name",
             "previous_location": "Previous Location",
             "previous_country": "Previous Country",
-            "model": "Device Model",
-            "platform": "Device Manufacturer",
             "reason": "Ban Reason",
             "about_me": "About Me",
         }
